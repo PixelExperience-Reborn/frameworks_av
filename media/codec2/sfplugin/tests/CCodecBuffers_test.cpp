@@ -27,6 +27,55 @@
 
 namespace android {
 
+// A real Codec2 client buffer that counts attempts to recover the underlying
+// component buffer. Release without an output pointer must not try to recover
+// a component buffer or retain stale references.
+class TrackingLocalLinearBuffer : public LocalLinearBuffer {
+public:
+    TrackingLocalLinearBuffer()
+        : LocalLinearBuffer(new AMessage, new ABuffer(16)) {}
+
+    std::shared_ptr<C2Buffer> asC2Buffer() override {
+        ++mConversionCount;
+        return nullptr;
+    }
+
+    void clearC2BufferRefs() override {
+        ++mClearCount;
+    }
+
+    int conversionCount() const { return mConversionCount; }
+    int clearCount() const { return mClearCount; }
+
+private:
+    int mConversionCount = 0;
+    int mClearCount = 0;
+};
+
+TEST(Codec2BufferReleaseTest, FlexSlotReleaseWithoutOutputSkipsConversion) {
+    sp<TrackingLocalLinearBuffer> client = new TrackingLocalLinearBuffer;
+    FlexBuffersImpl buffers("test");
+    EXPECT_EQ(0u, buffers.assignSlot(client));
+
+    ASSERT_TRUE(buffers.releaseSlot(client, nullptr, true));
+    EXPECT_EQ(0, client->conversionCount());
+    EXPECT_EQ(1, client->clearCount());
+    EXPECT_EQ(0u, buffers.numActiveSlots());
+}
+
+TEST(Codec2BufferReleaseTest, ArrayReturnWithoutOutputSkipsConversion) {
+    sp<TrackingLocalLinearBuffer> client = new TrackingLocalLinearBuffer;
+    FlexBuffersImpl flex("test");
+    EXPECT_EQ(0u, flex.assignSlot(client));
+
+    BuffersArrayImpl buffers;
+    buffers.initialize(flex, 1, [] { return sp<Codec2Buffer>{}; });
+
+    ASSERT_TRUE(buffers.returnBuffer(client, nullptr, true));
+    EXPECT_EQ(0, client->conversionCount());
+    EXPECT_EQ(1, client->clearCount());
+}
+
 static std::shared_ptr<RawGraphicOutputBuffers> GetRawGraphicOutputBuffers(
         int32_t width, int32_t height) {
     std::shared_ptr<RawGraphicOutputBuffers> buffers =
