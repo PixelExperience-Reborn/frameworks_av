@@ -1,0 +1,40 @@
+name: AOSP17 Codec2 PE port source checks
+
+on:
+  push:
+    branches:
+      - port/a17-frameworks-av-pe-20261103
+  pull_request:
+    paths:
+      - media/codec2/sfplugin/CCodecBuffers.cpp
+      - media/codec2/sfplugin/tests/CCodecBuffers_test.cpp
+      - .github/workflows/aosp17-codec2-source-checks.yml
+
+permissions:
+  contents: read
+
+jobs:
+  codec2-source-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Verify both reviewed Codec2 release paths and regression cases
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("media/codec2/sfplugin/CCodecBuffers.cpp").read_text()
+          tests = Path("media/codec2/sfplugin/tests/CCodecBuffers_test.cpp").read_text()
+          build = Path("media/codec2/sfplugin/tests/Android.bp").read_text()
+          assert source.count("if (!c2buffer) {") == 2, "Unexpected null-output checks"
+          assert source.count("clientBuffer->clearC2BufferRefs();\n            return true;") == 2
+          assert "FlexSlotReleaseWithoutOutputSkipsConversion" in tests
+          assert "ArrayReturnWithoutOutputSkipsConversion" in tests
+          assert '"CCodecBuffers_test.cpp"' in build
+          assert 'name: "ccodec_unit_test"' in build
+          print("PASS: both PE Codec2 guards and Android unit cases present")
+          PY
+      - name: Check patch formatting
+        run: git diff --check HEAD~1 HEAD
